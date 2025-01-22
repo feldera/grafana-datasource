@@ -8,7 +8,8 @@ import (
 )
 
 type PluginSettings struct {
-	Path    string                `json:"path"`
+	BaseUrl    string                `json:"baseUrl"`
+	Pipeline   string		 `json:"pipeline"`
 	Secrets *SecretPluginSettings `json:"-"`
 }
 

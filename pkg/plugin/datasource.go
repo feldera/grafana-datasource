@@ -4,12 +4,16 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
+	"net/url"
+	"strings"
 	"time"
 
+	"github.com/feldera/feldera/pkg/models"
 	"github.com/grafana/grafana-plugin-sdk-go/backend"
 	"github.com/grafana/grafana-plugin-sdk-go/backend/instancemgmt"
-	"github.com/grafana/grafana-plugin-sdk-go/data"
-	"github.com/feldera/feldera/pkg/models"
+	"github.com/grafana/infinity-libs/lib/go/jsonframer"
 )
 
 // Make sure Datasource implements required interfaces. This is important to do
@@ -24,13 +28,26 @@ var (
 )
 
 // NewDatasource creates a new datasource instance.
-func NewDatasource(_ context.Context, _ backend.DataSourceInstanceSettings) (instancemgmt.Instance, error) {
-	return &Datasource{}, nil
+func NewDatasource(_ context.Context, setting backend.DataSourceInstanceSettings) (instancemgmt.Instance, error) {
+	settings, err := models.LoadPluginSettings(setting)
+	if err != nil {
+		return nil, err
+	}
+
+	return &Datasource{
+		client: http.Client{},
+		pipeline: settings.Pipeline,
+		baseUrl: settings.BaseUrl,
+	}, nil
 }
 
 // Datasource is an example datasource which can respond to data queries, reports
 // its health and has streaming skills.
-type Datasource struct{}
+type Datasource struct{
+	client http.Client
+	baseUrl string
+	pipeline string
+}
 
 // Dispose here tells plugin SDK that plugin wants to clean up resources when a new instance
 // created. As soon as datasource settings change detected by SDK old datasource instance will
@@ -59,7 +76,9 @@ func (d *Datasource) QueryData(ctx context.Context, req *backend.QueryDataReques
 	return response, nil
 }
 
-type queryModel struct{}
+type queryModel struct{
+	QueryText string		`json:"queryText"`
+}
 
 func (d *Datasource) query(_ context.Context, pCtx backend.PluginContext, query backend.DataQuery) backend.DataResponse {
 	var response backend.DataResponse
@@ -67,23 +86,84 @@ func (d *Datasource) query(_ context.Context, pCtx backend.PluginContext, query 
 	// Unmarshal the JSON into our queryModel.
 	var qm queryModel
 
+	// TODO: query.TimeRange
+	// query.MaxDataPoints
+	// query.Interval
+	
 	err := json.Unmarshal(query.JSON, &qm)
 	if err != nil {
-		return backend.ErrDataResponse(backend.StatusBadRequest, fmt.Sprintf("json unmarshal: %v", err.Error()))
+		return backend.ErrDataResponse(backend.StatusValidationFailed, fmt.Sprintf("json unmarshal: %v", err.Error()))
 	}
 
-	// create data frame response.
-	// For an overview on data frames and how grafana handles them:
-	// https://grafana.com/developers/plugin-tools/introduction/data-frames
-	frame := data.NewFrame("response")
+	sql := qm.QueryText
 
-	// add fields.
-	frame.Fields = append(frame.Fields,
-		data.NewField("time", nil, []time.Time{query.TimeRange.From, query.TimeRange.To}),
-		data.NewField("values", nil, []int64{10, 20}),
-	)
+	if sql == "" {
+		return response
+	}
 
-	// add the frames to the response.
+	sql = strings.ReplaceAll(sql, "$__timeFrom()", fmt.Sprintf("'%s'", query.TimeRange.From.UTC().Format(time.RFC3339)))
+	sql = strings.ReplaceAll(sql, "$__timeTo()", fmt.Sprintf("'%s'", query.TimeRange.To.UTC().Format(time.RFC3339)))
+
+	println(sql)
+
+	params := url.Values{}
+	params.Add("format", "json")
+	params.Add("sql", sql)
+
+	url := fmt.Sprintf("%s/v0/pipelines/%s/query?%s", d.baseUrl, d.pipeline, params.Encode())
+
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return backend.ErrDataResponse(backend.StatusInternal, fmt.Sprintf("failed to create http request: %v", err.Error()))
+	}
+
+	if pCtx.DataSourceInstanceSettings != nil {
+		config, err := models.LoadPluginSettings(*pCtx.DataSourceInstanceSettings)
+		if err != nil {
+			return backend.ErrDataResponse(backend.StatusInternal, fmt.Sprintf("failed to load http config: %v", err.Error()))
+		}
+
+		apiKey := config.Secrets.ApiKey
+		if apiKey != "" {
+			req.Header.Add("Authorization", fmt.Sprintf("Bearer %s", apiKey))
+		}
+	}
+
+	resp, err := d.client.Do(req)
+	if err != nil {
+		return backend.ErrDataResponse(backend.StatusBadGateway, fmt.Sprintf("feldera error: %v", err.Error()))
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode/100 != 2 {
+		msg, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return backend.ErrDataResponse(
+				backend.StatusBadGateway,
+				fmt.Sprintf("err: query failed, status: %s", resp.Status))
+		}
+		errMsg := string(msg)
+		
+		return backend.ErrDataResponse(backend.StatusBadRequest, 
+			fmt.Sprintf("err: query failed, status: '%s', error: %s", resp.Status, errMsg))
+	}
+
+	contents, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return backend.ErrDataResponse(backend.StatusInternal,
+			fmt.Sprintf("err: query failed, status: '%s', error: %s", resp.Status, err.Error()))
+	}
+
+
+	jsonstr := "[" + strings.TrimSpace(string(contents))
+	jsonstr = strings.ReplaceAll(jsonstr, "\n", ", ") + "]"
+
+	frame, err := jsonframer.ToFrame(jsonstr, jsonframer.FramerOptions{})
+	if err != nil {
+		return backend.ErrDataResponse(backend.StatusInternal,
+			fmt.Sprintf("err: query failed, status: '%s', error: %s", resp.Status, err.Error()))
+	}
+
 	response.Frames = append(response.Frames, frame)
 
 	return response
@@ -103,11 +183,32 @@ func (d *Datasource) CheckHealth(_ context.Context, req *backend.CheckHealthRequ
 		return res, nil
 	}
 
-	if config.Secrets.ApiKey == "" {
+	apiKey := config.Secrets.ApiKey
+	if apiKey != "" {
+	}
+
+	url := fmt.Sprintf("%s/v0/pipelines", d.baseUrl)
+
+	r, err := http.NewRequest("GET", url, nil)
+	if err != nil {
 		res.Status = backend.HealthStatusError
-		res.Message = "API key is missing"
+		res.Message = "Unable to create HTTP request"
 		return res, nil
 	}
+
+	resp, err := d.client.Do(r)
+	if err != nil {
+		res.Status = backend.HealthStatusError
+		res.Message = "Data source unavailable"
+		return res, nil
+	}
+
+	if resp.StatusCode >= 400 || resp.StatusCode < 200 {
+		res.Status = backend.HealthStatusError
+		res.Message = "Invalid response from data source"
+		return res, nil
+	}
+
 
 	return &backend.CheckHealthResult{
 		Status:  backend.HealthStatusOk,
