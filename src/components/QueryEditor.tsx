@@ -1,4 +1,4 @@
-import React  from 'react';
+import React from 'react';
 import { CodeEditor } from '@grafana/ui';
 import { QueryEditorProps } from '@grafana/data';
 import { DataSource } from '../datasource';
@@ -13,15 +13,15 @@ export function QueryEditor({ query, onChange, onRunQuery }: Props) {
   };
 
   return (
-      <CodeEditor
-        width=""
-        height="100px"
-        language="sql"
-        value={query.queryText ?? ''}
-        onSave={onQueryTextChange}
-        onBlur={onQueryTextChange}
-        showMiniMap={false}
-        showLineNumbers={true} 
-      />
+    <CodeEditor
+      width=""
+      height="100px"
+      language="sql"
+      value={query.queryText ?? ''}
+      onSave={onQueryTextChange}
+      onBlur={onQueryTextChange}
+      showMiniMap={false}
+      showLineNumbers={true}
+    />
   );
 }

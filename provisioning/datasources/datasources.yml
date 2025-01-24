@@ -9,6 +9,7 @@ datasources:
     version: 1
     editable: true
     jsonData:
-      path: '/resources'
+      baseUrl: 'http://localhost:8080'
+      pipeline: 'blah'
     secureJsonData:
-      apiKey: 'api-key'
+      apiKey: ''
