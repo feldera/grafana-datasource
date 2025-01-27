@@ -7,17 +7,35 @@
   "backend": true,
   "executable": "gpx_feldera",
   "info": {
-    "description": "",
+    "description": "A grafana data source plugin for Feldera.",
     "author": {
       "name": "Feldera"
     },
-    "keywords": ["datasource"],
+    "keywords": ["feldera", "datasource"],
     "logos": {
       "small": "img/logo.svg",
       "large": "img/logo.svg"
     },
-    "links": [],
-    "screenshots": [],
+    "links": [
+      {
+        "name": "Website",
+        "url": "https://feldera.com"
+      },
+      {
+        "name": "Github",
+        "url": "https://github.com/feldera/feldera-feldera-datasource"
+      }
+    ],
+    "screenshots": [
+      {
+        "name": "query_editor",
+        "path": "img/query_editor.png"
+      },
+      {
+        "name": "config_editor",
+        "path": "img/config_editor.png"
+      }
+    ],
     "version": "%VERSION%",
     "updated": "%TODAY%"
   },
