@@ -9,7 +9,7 @@ datasources:
     version: 1
     editable: true
     jsonData:
-      baseUrl: 'http://localhost:8080'
-      pipeline: 'blah'
+      baseUrl: 'http://feldera:8080'
+      pipeline: 'grafana'
     secureJsonData:
       apiKey: ''
