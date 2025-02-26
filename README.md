@@ -1,3 +1,14 @@
+# Installing the Plugin
+
+1. Download the most recent release.
+2. Unzip it inside your grafana instance's `plugins/` directory.
+3. Enable unsigned plugins in Grafana. In the `[plugins]` section of 
+   `grafana.ini` add the following:
+
+```
+allow_loading_unsigned_plugins = feldera-feldera-datasource
+```
+
 # Testing this Plugin
 
 1. Run `docker compose up` to bring up [feldera](http://localhost:8080) and [grafana](http://localhost:3000).
